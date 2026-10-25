@@ -62,7 +62,7 @@ async function getSources(){
               else skip.push(name);
             } else if(/\.pdf$/i.test(name)){
               const b=await item.async("uint8array");
-              docs.push({name,body:await readPdf(b,name)});
+              const body=await readPdf(b,name);if(body.replace(/\[Documento:[^\n]+\]/g,"").trim().length<60)skip.push(name+" (PDF sem texto extraível)");else docs.push({name,body});
             } else skip.push(name);
           }catch{skip.push(name);}
         }
@@ -72,7 +72,7 @@ async function getSources(){
         if(xml)docs.push({name:file.name,body:extractParagraphs(xml).map(x=>x.value).join("\n")});
         else skip.push(file.name);
       } else if(/\.pdf$/i.test(file.name)){
-        docs.push({name:file.name,body:await readPdf(new Uint8Array(await file.arrayBuffer()),file.name)});
+        const body=await readPdf(new Uint8Array(await file.arrayBuffer()),file.name);if(body.replace(/\[Documento:[^\n]+\]/g,"").trim().length<60)skip.push(file.name+" (PDF sem texto extraível)");else docs.push({name:file.name,body});
       } else if(/\.(txt|md|csv|json)$/i.test(file.name)){
         docs.push({name:file.name,body:(await file.text()).slice(0,120000)});
       } else skip.push(file.name);
@@ -83,9 +83,81 @@ async function getSources(){
 function findRules(paragraphs){const result=[],seen=new Set();for(const p of paragraphs){for(const rule of rules){const index=p.value.toLocaleLowerCase("pt-BR").indexOf(rule.from.toLocaleLowerCase("pt-BR"));if(index<0)continue;const actual=p.value.slice(index,index+rule.from.length),key=p.value+"::"+rule.from;if(seen.has(key))continue;seen.add(key);result.push({kind:"Redação",from:actual,to:rule.to,reason:rule.reason,source:"Regra local da Biblioteca SG2",paragraph:p.value});}}
 return result;}
 function findingsDocumentary(paragraphs,docs){let results=[];const sourceText=docs.map(x=>x.body).join("\n");if(!sourceText)return results;const pattern=/\b\d{1,2}\/\d{1,2}\/20\d\d\b/g;const fromReport=new Set(paragraphs.flatMap(p=>[...p.value.matchAll(pattern)].map(x=>x[0])));const fromDocs=new Set([...sourceText.matchAll(pattern)].map(x=>x[0]));for(const d of fromReport){if(fromDocs.has(d))continue;results.push({kind:"Conferência documental",from:d,to:"Verificar a data nos documentos do processo",reason:"A data não foi localizada em formato idêntico nos arquivos textuais lidos. Isso NÃO comprova erro, e não substitui análise dos PDFs, imagens ou demais documentos.",source:"Comparação textual limitada"});if(results.length>=5)break;}return results;}
-function applyTracked(xml,findings){let changed=0;let current=xml;for(const finding of findings.filter(f=>!/^CONFERIR:/i.test(f.to) && f.from?.length && f.to?.length && f.kind!=="Conferência documental")){const needle=finding.from;if(!needle||!finding.to)continue;const pRe=/<w:p(?:\s[^>]*)?>[\s\S]*?<\/w:p>/g;let matched=false;current=current.replace(pRe,p=>{if(matched)return p;const runs=[...p.matchAll(/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/g)];const combined=decodeXML(runs.map(x=>x[1]).join(""));if(combined.toLowerCase().indexOf(needle.toLowerCase())<0)return p;const single=runs.find(x=>decodeXML(x[1]).toLowerCase().includes(needle.toLowerCase()));if(!single)return p;const full=decodeXML(single[1]),idx=full.toLowerCase().indexOf(needle.toLowerCase());if(idx<0)return p;const pre=full.slice(0,idx),old=full.slice(idx,idx+needle.length),post=full.slice(idx+needle.length);const id=Date.now()%100000+changed;const date=new Date().toISOString();const ins='<w:ins w:id="'+id+'" w:author="SG2 Validador" w:date="'+date+'"><w:r><w:t xml:space="preserve">'+escXML(finding.to)+'</w:t></w:r></w:ins>';const del='<w:del w:id="'+(id+100001)+'" w:author="SG2 Validador" w:date="'+date+'"><w:r><w:delText xml:space="preserve">'+escXML(old)+'</w:delText></w:r></w:del>';let replace=(pre?'<w:r><w:t xml:space="preserve">'+escXML(pre)+'</w:t></w:r>':'')+del+ins+(post?'<w:r><w:t xml:space="preserve">'+escXML(post)+'</w:t></w:r>':'');const replaced=p.replace(single[0],replace);if(replaced!==p){matched=true;changed++;return replaced;}return p;});}return{xml:current,changed};}
+function applyTracked(xml,findings){
+  const ns="http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+  const doc=new DOMParser().parseFromString(xml,"application/xml");
+  if(doc.getElementsByTagName("parsererror").length)return {xml,changed:0};
+  const paras=Array.from(doc.getElementsByTagNameNS(ns,"p"));
+  let changed=0;const used=new Set();
+  const create=(tag)=>doc.createElementNS(ns,"w:"+tag);
+  const setText=(run,value,deleted)=>{
+    const t=create(deleted?"delText":"t");
+    t.setAttribute("xml:space","preserve");
+    t.textContent=value;
+    run.appendChild(t);
+    return run;
+  };
+  const makeRun=(src,value,deleted)=>{
+    const r=create("r");
+    const pr=Array.from(src.childNodes).find(n=>n.nodeType===1&&n.localName==="rPr"&&n.namespaceURI===ns);
+    if(pr)r.appendChild(pr.cloneNode(true));
+    setText(r,value,deleted);
+    return r;
+  };
+  const wrap=(type,src,value,id)=>{
+    const node=create(type);
+    node.setAttributeNS(ns,"w:id",String(id));
+    node.setAttributeNS(ns,"w:author","SG2 Validador");
+    node.setAttributeNS(ns,"w:date",new Date().toISOString());
+    node.appendChild(makeRun(src,value,type==="del"));
+    return node;
+  };
+  for(const f of findings){
+    if(!f || !f.from || !f.to || /^CONFERIR:/i.test(f.to))continue;
+    if(f.kind==="Conferência documental")continue;
+    const needle=String(f.from);
+    for(const p of paras){
+      if(used.has(p))continue;
+      const children=Array.from(p.childNodes).filter(n=>n.nodeType===1);
+      const runs=children.filter(n=>n.namespaceURI===ns&&n.localName==="r");
+      if(!runs.length || children.some(n=>n.namespaceURI===ns&&["ins","del","hyperlink"].includes(n.localName)))continue;
+      const segments=[];let offset=0,valid=true;
+      for(const run of runs){
+        const parts=Array.from(run.childNodes).filter(n=>n.nodeType===1);
+        if(parts.some(n=>n.namespaceURI!==ns||!["rPr","t"].includes(n.localName))){valid=false;break;}
+        const texts=parts.filter(n=>n.localName==="t");
+        if(texts.length!==1){valid=false;break;}
+        const value=texts[0].textContent||"";
+        segments.push({run,value,start:offset,end:offset+value.length});
+        offset+=value.length;
+      }
+      if(!valid)continue;
+      const full=segments.map(q=>q.value).join("");
+      const at=full.indexOf(needle);
+      if(at<0)continue;
+      const end=at+needle.length;
+      let inserted=false;
+      for(const q of segments){
+        if(q.end<=at||q.start>=end)continue;
+        const frag=doc.createDocumentFragment();
+        const left=Math.max(0,at-q.start),right=Math.min(q.value.length,end-q.start);
+        if(left>0)frag.appendChild(makeRun(q.run,q.value.slice(0,left),false));
+        const mid=q.value.slice(left,right);
+        if(mid)frag.appendChild(wrap("del",q.run,mid,changed*2+1));
+        if(!inserted){
+          frag.appendChild(wrap("ins",q.run,String(f.to),changed*2+2));
+          inserted=true;
+        }
+        if(right<q.value.length)frag.appendChild(makeRun(q.run,q.value.slice(right),false));
+        p.replaceChild(frag,q.run);
+      }
+      if(inserted){used.add(p);changed++;break;}
+    }
+  }
+  return {xml:new XMLSerializer().serializeToString(doc),changed};
+}
 function asText(r){return ["SG2 | SUGESTÕES DE VALIDAÇÃO","Resultado assistido, sujeito a conferência jurídica.",...r.findings.map((f,i)=>"\n"+(i+1)+". "+f.kind+"\nOnde está: "+f.from+"\nSubstituir por / conferir: "+f.to+"\nJustificativa: "+f.reason+"\nFonte: "+f.source)].join("\n");}
-$("validate").onclick=async()=>{if(!selectedFile){alert("Selecione o relatório DOCX.");return;}if(typeof JSZip==="undefined"){alert("A biblioteca de leitura DOCX não carregou. Verifique a conexão.");return;}const useAI=$("use-ai").checked;if(useAI&&!$("ai-consent").checked){alert("Para usar IA externa, leia e confirme a autorização de envio dos dados.");return;}const b=$("validate");b.disabled=true;b.textContent="Analisando arquivos...";try{const zip=await JSZip.loadAsync(await selectedFile.arrayBuffer());const xml=await zip.file("word/document.xml")?.async("string");if(!xml)throw Error("Arquivo DOCX inválido.");const paragraphs=extractParagraphs(xml);const sources=await getSources();let aiSummary="",aiError="";
+$("validate").onclick=async()=>{if(!selectedFile){alert("Selecione o relatório DOCX.");return;}if(typeof JSZip==="undefined"){alert("A biblioteca de leitura DOCX não carregou. Verifique a conexão.");return;}const useAI=$("use-ai").checked;if(useAI&&!$("ai-consent").checked){alert("Para usar IA externa, leia e confirme a autorização de envio dos dados.");return;}if(useAI){try{if(!window.puter?.auth)throw Error("Puter não carregou.");if(!puter.auth.isSignedIn())await puter.auth.signIn();}catch(e){alert("Não foi possível entrar na conta Puter: "+(e?.message||e));return;}}const b=$("validate");b.disabled=true;b.textContent="Analisando arquivos...";try{const zip=await JSZip.loadAsync(await selectedFile.arrayBuffer());const xml=await zip.file("word/document.xml")?.async("string");if(!xml)throw Error("Arquivo DOCX inválido.");const paragraphs=extractParagraphs(xml);const sources=await getSources();let aiSummary="",aiError="";
 let findings=[...findRules(paragraphs),...findingsDocumentary(paragraphs,sources.docs)];
 if(useAI){
   try{
