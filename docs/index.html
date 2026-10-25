@@ -19,11 +19,20 @@
 <section class="panel"><div class="blockhead"><span class="blockicon">▱</span><div><h3><span class="num">02</span> Documentos do caso</h3><p>Pasta do Drive e documentos para confronto</p></div></div>
 <div class="urlinput"><span>↗</span><input id="drive-url" type="url" placeholder="https://drive.google.com/drive/folders/..."><button id="drive-open" type="button">Abrir</button></div>
 <p class="hint warn">O link não autoriza leitura automática do Drive. Para validação gratuita, baixe a pasta como ZIP no Drive e anexe abaixo.</p>
-<label class="attach"><input type="file" id="sources" multiple accept=".zip,.docx,.txt,.md,.csv,.json" hidden><span>＋ Adicionar documentos / ZIP da pasta</span><small id="source-label">Nenhum anexo selecionado</small></label></section>
+<label class="attach"><input type="file" id="sources" multiple accept=".zip,.docx,.pdf,.txt,.md,.csv,.json" hidden><span>＋ Adicionar documentos / ZIP da pasta</span><small id="source-label">Nenhum anexo selecionado</small></label></section>
 <section class="panel"><div class="blockhead"><span class="blockicon">▤</span><div><h3><span class="num">03</span> Forma de devolução</h3><p>Você escolhe como deseja trabalhar</p></div></div>
 <div class="modes"><label class="mode chosen"><input type="radio" name="mode" value="word" checked><span class="modeicon">W</span><div><strong>Word com alterações</strong><small>Arquivo revisado com inserções e exclusões controladas</small></div><span class="radio"></span></label><label class="mode"><input type="radio" name="mode" value="list"><span class="modeicon muted">≡</span><div><strong>Lista de sugestões</strong><small>Onde está, substituir por e justificativa</small></div><span class="radio"></span></label></div></section>
+<section class="ai-panel">
+<div class="ai-title"><div><span class="ai-icon">✦</span> <strong>Validação jurídica com IA</strong> <span class="new-label">NOVO</span></div></div>
+<p>Além das correções locais, a IA analisa fundamentação, coerência e os documentos anexados. Exige conta gratuita no Puter e utiliza a franquia mensal do usuário; ao esgotá-la, pode ser necessário pagar para continuar.</p>
+<label class="toggle-ai"><input id="use-ai" type="checkbox"> <span>Ativar análise inteligente nesta validação</span></label>
+<div class="ai-consent" id="consent-area" hidden>
+<label><input type="checkbox" id="ai-consent"> Autorizo o envio do texto deste relatório e dos documentos extraídos à plataforma Puter e aos provedores de IA utilizados. Confirmo que tenho autorização para compartilhar esse material.</label>
+<p><strong>Não use com documentos confidenciais de clientes sem autorização da Addvalora.</strong> Os textos enviados deixam o processamento local. O site não consulta automaticamente o Drive.</p>
+</div>
+</section>
 <section class="library-strip"><div class="library-header"><span>▤</span><strong>Biblioteca SG2</strong><span class="chip positive">No navegador</span></div><p>Regras locais e referências editáveis, sem envio de conteúdo a serviços externos.</p><div class="chips"><span>Critérios SG2</span><span>Redação</span><span>Consistência</span><span>Personalização</span></div></section>
-<button class="validate" id="validate" type="button">✦ &nbsp; Validar relatório <span>→</span></button><p class="tiny">Versão gratuita. Não substitui a conferência jurídica e não faz consulta automática ao Drive.</p>
+<button class="validate" id="validate" type="button">✦ &nbsp; Validar relatório <span>→</span></button><p class="tiny">Versão gratuita de hospedagem; IA sujeita à franquia da conta Puter. Não substitui a conferência jurídica nem consulta automaticamente o Drive.</p>
 </div>
 <div class="right"><section class="result-panel"><div class="righthead"><h3><span>▥</span> Resultado da validação</h3><span class="state" id="state">Aguardando</span></div>
 <div class="empty" id="empty"><span class="emptyico">▧</span><h3>Seu relatório, com mais precisão.</h3><p>Após a análise, as sugestões serão apresentadas nesta coluna.</p></div>
@@ -35,5 +44,8 @@
 </div></main></div>
 <dialog id="knowledge-dialog"><div class="dialog-head"><div><h2>Biblioteca SG2</h2><p>Critérios locais de validação</p></div><button id="close-knowledge" aria-label="Fechar">×</button></div><p>Você pode acrescentar regras objetivas de substituição. Elas ficam armazenadas neste navegador. Não há sincronização automática entre computadores.</p><label class="field">Expressão original<input id="rule-from" placeholder="Ex.: não houveram"></label><label class="field">Substituir por<input id="rule-to" placeholder="Ex.: não houve"></label><label class="field">Justificativa<textarea id="rule-reason" rows="2" placeholder="Explique a razão do ajuste"></textarea></label><button id="add-rule" class="save">Salvar regra</button><div id="rules-list"></div><div class="dialog-actions"><button id="export-rules">Exportar biblioteca (.json)</button><label class="import-rule"><input id="import-rules" type="file" accept=".json" hidden>Importar biblioteca</label></div><small>A biblioteca é um conjunto inicial de regras, não o acervo integral do projeto Coordenação.</small></dialog>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" defer></script>
+<script src="https://js.puter.com/v2/" defer></script>
+<script src="./ai-review.js" defer></script>
 <script src="./app.js" defer></script>
 </body></html>
