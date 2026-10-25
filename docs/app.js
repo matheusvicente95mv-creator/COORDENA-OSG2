@@ -18,6 +18,7 @@ function extractParagraphs(xml){return [...xml.matchAll(/<w:p(?:\s[^>]*)?>[\s\S]
 function addFile(f){if(f&&!f.name.toLowerCase().endsWith(".docx")){alert("Selecione um DOCX.");return;}selectedFile=f;$("file-label").textContent=f?f.name:"Clique ou arraste seu relatório";}
 $("file").onchange=e=>addFile(e.target.files[0]);$("drop").ondragover=e=>{e.preventDefault();$("drop").classList.add("dragging")};$("drop").ondragleave=()=>$("drop").classList.remove("dragging");$("drop").ondrop=e=>{e.preventDefault();$("drop").classList.remove("dragging");addFile(e.dataTransfer.files[0]);};
 $("sources").onchange=e=>{selectedSources=[...e.target.files];$("source-label").textContent=selectedSources.length?selectedSources.map(f=>f.name).join(", "):"Nenhum anexo selecionado";};
+$("use-ai").onchange=()=>{$("consent-area").hidden=!$("use-ai").checked; if(!$("use-ai").checked)$("ai-consent").checked=false;};
 document.querySelectorAll('input[name="mode"]').forEach(el=>el.onchange=()=>document.querySelectorAll(".mode").forEach(m=>m.classList.toggle("chosen",m.querySelector("input").checked)));
 $("drive-open").onclick=()=>{const raw=$("drive-url").value.trim();try{const u=new URL(raw);if(u.protocol!=="https:"||!["drive.google.com","docs.google.com"].includes(u.hostname))throw Error();window.open(u.href,"_blank","noopener,noreferrer");}catch{alert("Insira um link HTTPS válido do Google Drive.");}};
 $("open-knowledge").onclick=()=>{$("knowledge-dialog").showModal();renderRules();};$("close-knowledge").onclick=()=>$("knowledge-dialog").close();
@@ -26,13 +27,81 @@ $("add-rule").onclick=()=>{const r={from:$("rule-from").value.trim(),to:$("rule-
 function downloadBlob(blob,name){const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);}
 $("export-rules").onclick=()=>downloadBlob(new Blob([JSON.stringify(rules,null,2)],{type:"application/json"}),"sg2-biblioteca.json");
 $("import-rules").onchange=async e=>{try{const data=JSON.parse(await e.target.files[0].text());if(!Array.isArray(data)||!data.every(x=>typeof x.from==="string"&&typeof x.to==="string"&&typeof x.reason==="string"))throw Error();rules=data;saveRules();renderRules();}catch{alert("Arquivo JSON de regras inválido.");}};
-async function getSources(){let docs=[],skip=[];for(const file of selectedSources){try{if(/\.zip$/i.test(file.name)){const zip=await JSZip.loadAsync(file);for(const [name,item] of Object.entries(zip.files)){if(item.dir||name.includes("__MACOSX/"))continue;if(/\.(txt|md|csv|json)$/i.test(name)){const s=await item.async("string");docs.push({name,body:s.slice(0,120000)});}else if(/\.docx$/i.test(name)){const z=await JSZip.loadAsync(await item.async("arraybuffer"));const xml=await z.file("word/document.xml")?.async("string");if(xml)docs.push({name,body:extractParagraphs(xml).map(x=>x.value).join("\n").slice(0,120000)});else skip.push(name);}else skip.push(name);}}else if(/\.docx$/i.test(file.name)){const z=await JSZip.loadAsync(await file.arrayBuffer());const x=await z.file("word/document.xml")?.async("string");if(x)docs.push({name:file.name,body:extractParagraphs(x).map(t=>t.value).join("\n")});else skip.push(file.name);}else if(/\.(txt|md|csv|json)$/i.test(file.name))docs.push({name:file.name,body:(await file.text()).slice(0,120000)});else skip.push(file.name);}catch{skip.push(file.name);}}return{docs,skip};}
+async function readPdf(bytes,name) {
+  if(!window.pdfjsLib)throw Error("A biblioteca PDF ainda não carregou.");
+  pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+  const pdf=await pdfjsLib.getDocument({data:bytes}).promise;
+  const pages=Math.min(pdf.numPages,60), chunks=[];
+  for(let i=1;i<=pages;i++){
+    const p=await pdf.getPage(i);
+    const t=await p.getTextContent();
+    chunks.push("[Documento: "+name+"; página "+i+"]\n"+t.items.map(x=>x.str||"").join(" "));
+  }
+  return chunks.join("\n").slice(0,130000);
+}
+async function getSources(){
+  const docs=[],skip=[];
+  for(const file of selectedSources){
+    try {
+      if(file.size>60*1024*1024){skip.push(file.name+" (tamanho excedido)");continue;}
+      if(/\.zip$/i.test(file.name)){
+        const zip=await JSZip.loadAsync(file);
+        let counter=0;
+        for(const [name,item] of Object.entries(zip.files)){
+          if(item.dir||name.includes("__MACOSX/"))continue;
+          counter++;
+          if(counter>100){skip.push("Mais de 100 arquivos no ZIP; interrompida leitura");break;}
+          try{
+            if(item._data?.uncompressedSize>18*1024*1024){skip.push(name+" (tamanho excedido)");continue;}
+            if(/\.(txt|md|csv|json)$/i.test(name)){
+              docs.push({name,body:(await item.async("string")).slice(0,120000)});
+            } else if(/\.docx$/i.test(name)){
+              const z=await JSZip.loadAsync(await item.async("arraybuffer"));
+              const xml=await z.file("word/document.xml")?.async("string");
+              if(xml)docs.push({name,body:extractParagraphs(xml).map(x=>x.value).join("\n").slice(0,120000)});
+              else skip.push(name);
+            } else if(/\.pdf$/i.test(name)){
+              const b=await item.async("uint8array");
+              docs.push({name,body:await readPdf(b,name)});
+            } else skip.push(name);
+          }catch{skip.push(name);}
+        }
+      } else if(/\.docx$/i.test(file.name)){
+        const z=await JSZip.loadAsync(await file.arrayBuffer());
+        const xml=await z.file("word/document.xml")?.async("string");
+        if(xml)docs.push({name:file.name,body:extractParagraphs(xml).map(x=>x.value).join("\n")});
+        else skip.push(file.name);
+      } else if(/\.pdf$/i.test(file.name)){
+        docs.push({name:file.name,body:await readPdf(new Uint8Array(await file.arrayBuffer()),file.name)});
+      } else if(/\.(txt|md|csv|json)$/i.test(file.name)){
+        docs.push({name:file.name,body:(await file.text()).slice(0,120000)});
+      } else skip.push(file.name);
+    }catch{skip.push(file.name);}
+  }
+  return {docs,skip};
+}
 function findRules(paragraphs){const result=[],seen=new Set();for(const p of paragraphs){for(const rule of rules){const index=p.value.toLocaleLowerCase("pt-BR").indexOf(rule.from.toLocaleLowerCase("pt-BR"));if(index<0)continue;const actual=p.value.slice(index,index+rule.from.length),key=p.value+"::"+rule.from;if(seen.has(key))continue;seen.add(key);result.push({kind:"Redação",from:actual,to:rule.to,reason:rule.reason,source:"Regra local da Biblioteca SG2",paragraph:p.value});}}
 return result;}
 function findingsDocumentary(paragraphs,docs){let results=[];const sourceText=docs.map(x=>x.body).join("\n");if(!sourceText)return results;const pattern=/\b\d{1,2}\/\d{1,2}\/20\d\d\b/g;const fromReport=new Set(paragraphs.flatMap(p=>[...p.value.matchAll(pattern)].map(x=>x[0])));const fromDocs=new Set([...sourceText.matchAll(pattern)].map(x=>x[0]));for(const d of fromReport){if(fromDocs.has(d))continue;results.push({kind:"Conferência documental",from:d,to:"Verificar a data nos documentos do processo",reason:"A data não foi localizada em formato idêntico nos arquivos textuais lidos. Isso NÃO comprova erro, e não substitui análise dos PDFs, imagens ou demais documentos.",source:"Comparação textual limitada"});if(results.length>=5)break;}return results;}
-function applyTracked(xml,findings){let changed=0;let current=xml;for(const finding of findings.filter(f=>f.kind==="Redação")){const needle=finding.from;if(!needle||!finding.to)continue;const pRe=/<w:p(?:\s[^>]*)?>[\s\S]*?<\/w:p>/g;let matched=false;current=current.replace(pRe,p=>{if(matched)return p;const runs=[...p.matchAll(/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/g)];const combined=decodeXML(runs.map(x=>x[1]).join(""));if(combined.toLowerCase().indexOf(needle.toLowerCase())<0)return p;const single=runs.find(x=>decodeXML(x[1]).toLowerCase().includes(needle.toLowerCase()));if(!single)return p;const full=decodeXML(single[1]),idx=full.toLowerCase().indexOf(needle.toLowerCase());if(idx<0)return p;const pre=full.slice(0,idx),old=full.slice(idx,idx+needle.length),post=full.slice(idx+needle.length);const id=Date.now()%100000+changed;const date=new Date().toISOString();const ins='<w:ins w:id="'+id+'" w:author="SG2 Validador" w:date="'+date+'"><w:r><w:t xml:space="preserve">'+escXML(finding.to)+'</w:t></w:r></w:ins>';const del='<w:del w:id="'+(id+100001)+'" w:author="SG2 Validador" w:date="'+date+'"><w:r><w:delText xml:space="preserve">'+escXML(old)+'</w:delText></w:r></w:del>';let replace=(pre?'<w:r><w:t xml:space="preserve">'+escXML(pre)+'</w:t></w:r>':'')+del+ins+(post?'<w:r><w:t xml:space="preserve">'+escXML(post)+'</w:t></w:r>':'');const replaced=p.replace(single[0],replace);if(replaced!==p){matched=true;changed++;return replaced;}return p;});}return{xml:current,changed};}
+function applyTracked(xml,findings){let changed=0;let current=xml;for(const finding of findings.filter(f=>!/^CONFERIR:/i.test(f.to) && f.from?.length && f.to?.length && f.kind!=="Conferência documental")){const needle=finding.from;if(!needle||!finding.to)continue;const pRe=/<w:p(?:\s[^>]*)?>[\s\S]*?<\/w:p>/g;let matched=false;current=current.replace(pRe,p=>{if(matched)return p;const runs=[...p.matchAll(/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/g)];const combined=decodeXML(runs.map(x=>x[1]).join(""));if(combined.toLowerCase().indexOf(needle.toLowerCase())<0)return p;const single=runs.find(x=>decodeXML(x[1]).toLowerCase().includes(needle.toLowerCase()));if(!single)return p;const full=decodeXML(single[1]),idx=full.toLowerCase().indexOf(needle.toLowerCase());if(idx<0)return p;const pre=full.slice(0,idx),old=full.slice(idx,idx+needle.length),post=full.slice(idx+needle.length);const id=Date.now()%100000+changed;const date=new Date().toISOString();const ins='<w:ins w:id="'+id+'" w:author="SG2 Validador" w:date="'+date+'"><w:r><w:t xml:space="preserve">'+escXML(finding.to)+'</w:t></w:r></w:ins>';const del='<w:del w:id="'+(id+100001)+'" w:author="SG2 Validador" w:date="'+date+'"><w:r><w:delText xml:space="preserve">'+escXML(old)+'</w:delText></w:r></w:del>';let replace=(pre?'<w:r><w:t xml:space="preserve">'+escXML(pre)+'</w:t></w:r>':'')+del+ins+(post?'<w:r><w:t xml:space="preserve">'+escXML(post)+'</w:t></w:r>':'');const replaced=p.replace(single[0],replace);if(replaced!==p){matched=true;changed++;return replaced;}return p;});}return{xml:current,changed};}
 function asText(r){return ["SG2 | SUGESTÕES DE VALIDAÇÃO","Resultado assistido, sujeito a conferência jurídica.",...r.findings.map((f,i)=>"\n"+(i+1)+". "+f.kind+"\nOnde está: "+f.from+"\nSubstituir por / conferir: "+f.to+"\nJustificativa: "+f.reason+"\nFonte: "+f.source)].join("\n");}
-$("validate").onclick=async()=>{if(!selectedFile){alert("Selecione o relatório DOCX.");return;}if(typeof JSZip==="undefined"){alert("A biblioteca de leitura DOCX não carregou. Verifique a conexão.");return;}const b=$("validate");b.disabled=true;b.textContent="Analisando arquivos...";try{const zip=await JSZip.loadAsync(await selectedFile.arrayBuffer());const xml=await zip.file("word/document.xml")?.async("string");if(!xml)throw Error("Arquivo DOCX inválido.");const paragraphs=extractParagraphs(xml);const sources=await getSources();const findings=[...findRules(paragraphs),...findingsDocumentary(paragraphs,sources.docs)];const redline=applyTracked(xml,findings);zip.file("word/document.xml",redline.xml);const docx=await zip.generateAsync({type:"blob",compression:"DEFLATE"});processed={findings,docx,redline,read:sources.docs.length,skipped:sources.skip};$("empty").hidden=true;$("active").hidden=false;$("state").textContent="Concluído";$("state").style.background="#e3f7ed";$("state").style.color="#147b5a";$("count").textContent=findings.length;$("read-count").textContent=sources.docs.length;$("skip-count").textContent=sources.skip.length;$("summary-text").textContent=findings.length?findings.length+" apontamento(s) localizados nas verificações locais.":"Nenhuma ocorrência identificada pelas regras locais.";let warnings=[];if($("drive-url").value.trim())warnings.push("O link do Drive não foi consultado automaticamente.");if(sources.skip.length)warnings.push(sources.skip.length+" documento(s) sem leitura (incluindo PDF ou imagens).");warnings.push("Sem IA externa e sem acervo jurídico consolidado: a validação é limitada a regras locais.");if(redline.changed<findings.length)warnings.push("Alterações não aplicáveis com segurança permanecem apenas na lista de sugestões.");$("notice").textContent=warnings.join(" ");const out=$("findings");out.replaceChildren();for(const [i,f] of findings.entries()){const d=document.createElement("div");d.className="finding";d.innerHTML="<h5>"+(i+1)+". "+escapeHTML(f.kind)+"</h5><p class='before'><b>Onde está:</b> "+escapeHTML(f.from)+"</p><p class='after'><b>Substituir por / conferir:</b> "+escapeHTML(f.to)+"</p><p>"+escapeHTML(f.reason)+"</p><p><b>Fonte:</b> "+escapeHTML(f.source)+"</p>";out.append(d);}report=asText(processed);if(document.querySelector('input[name="mode"]:checked').value==="word"&&redline.changed===0)alert("Nenhuma alteração segura foi aplicada ao Word. Consulte a lista de sugestões.");}catch(e){alert("Não foi possível validar: "+(e.message||"erro desconhecido"));}finally{b.disabled=false;b.innerHTML='✦ &nbsp; Validar relatório <span>→</span>';}}
+$("validate").onclick=async()=>{if(!selectedFile){alert("Selecione o relatório DOCX.");return;}if(typeof JSZip==="undefined"){alert("A biblioteca de leitura DOCX não carregou. Verifique a conexão.");return;}const useAI=$("use-ai").checked;if(useAI&&!$("ai-consent").checked){alert("Para usar IA externa, leia e confirme a autorização de envio dos dados.");return;}const b=$("validate");b.disabled=true;b.textContent="Analisando arquivos...";try{const zip=await JSZip.loadAsync(await selectedFile.arrayBuffer());const xml=await zip.file("word/document.xml")?.async("string");if(!xml)throw Error("Arquivo DOCX inválido.");const paragraphs=extractParagraphs(xml);const sources=await getSources();let aiSummary="",aiError="";
+let findings=[...findRules(paragraphs),...findingsDocumentary(paragraphs,sources.docs)];
+if(useAI){
+  try{
+    const a=await window.sg2ReviewWithAI({
+      reportText:paragraphs.map(x=>x.value).join("\n"),
+      caseDocuments:sources.docs,
+      status:msg=>{b.textContent=msg;}
+    });
+    aiSummary=a.summary||"";
+    const keys=new Set(findings.map(f=>f.from+"::"+f.to));
+    for(const finding of a.findings){
+      if(keys.has(finding.from+"::"+finding.to))continue;
+      findings.push(finding); keys.add(finding.from+"::"+finding.to);
+    }
+  }catch(e){aiError=String(e?.message||e); console.error("IA externa indisponível:",e);}
+}const redline=applyTracked(xml,findings);zip.file("word/document.xml",redline.xml);const docx=await zip.generateAsync({type:"blob",compression:"DEFLATE"});processed={findings,docx,redline,read:sources.docs.length,skipped:sources.skip};$("empty").hidden=true;$("active").hidden=false;$("state").textContent="Concluído";$("state").style.background="#e3f7ed";$("state").style.color="#147b5a";$("count").textContent=findings.length;$("read-count").textContent=sources.docs.length;$("skip-count").textContent=sources.skip.length;$("summary-text").textContent=aiSummary|| (findings.length?findings.length+" apontamento(s) encontrados.":"Nenhuma ocorrência identificada pelas regras locais.");let warnings=[];if($("drive-url").value.trim())warnings.push("O link do Drive não foi consultado automaticamente.");if(sources.skip.length)warnings.push(sources.skip.length+" documento(s) sem leitura (incluindo PDF ou imagens).");if(!useAI)warnings.push("Modo local: apenas regras objetivas, sem revisão jurídica profunda.");else if(aiError)warnings.push("Falha ao consultar IA externa: "+aiError+" Apenas verificações locais foram aplicadas.");else warnings.push("A análise por IA foi executada com o texto enviado. As sugestões precisam ser verificadas por um responsável técnico.");warnings.push("A biblioteca atual ainda não contém o acervo jurídico do projeto Coordenação.");if(redline.changed<findings.length)warnings.push("Alterações não aplicáveis com segurança permanecem apenas na lista de sugestões.");$("notice").textContent=warnings.join(" ");const out=$("findings");out.replaceChildren();for(const [i,f] of findings.entries()){const d=document.createElement("div");d.className="finding";d.innerHTML="<h5>"+(i+1)+". "+escapeHTML(f.kind)+"</h5><p class='before'><b>Onde está:</b> "+escapeHTML(f.from)+"</p><p class='after'><b>Substituir por / conferir:</b> "+escapeHTML(f.to)+"</p><p>"+escapeHTML(f.reason)+"</p><p><b>Fonte:</b> "+escapeHTML(f.source)+"</p>";out.append(d);}report=asText(processed);if(document.querySelector('input[name="mode"]:checked').value==="word"&&redline.changed===0)alert("A análise terminou, mas nenhum trecho foi alterado automaticamente com segurança no Word. Consulte as sugestões.");}catch(e){alert("Não foi possível validar: "+(e.message||"erro desconhecido"));}finally{b.disabled=false;b.innerHTML='✦ &nbsp; Validar relatório <span>→</span>';}}
 $("download-word").onclick=()=>{if(!processed)return;downloadBlob(processed.docx,(selectedFile?.name||"Relatorio.docx").replace(/\.docx$/i,"_SG2_REVISADO.docx"));};
 $("download-list").onclick=()=>{if(report)downloadBlob(new Blob([report],{type:"text/plain;charset=utf-8"}),"SG2_Sugestoes.txt");};
 $("copy").onclick=async()=>{if(!report)return;try{await navigator.clipboard.writeText(report);alert("Sugestões copiadas.");}catch{alert("Cópia indisponível neste navegador.");}};
