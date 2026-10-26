@@ -27,3 +27,15 @@ A hospedagem GitHub Pages é gratuita. A IA externa é integrada via Puter.js, s
 - A IA pode errar ou gerar sugestões inadequadas. Todas precisam de conferência humana por responsável técnico, especialmente fatos, valores, cláusulas e jurisprudência.
 - O GitHub Pages é público. Nunca armazene documentos privados nem tokens no repositório.
 - O modo com IA depende de terceiros, rede e saldo da conta; o modo local continua disponível independentemente dessa opção.
+
+## Como trazer conhecimento do projeto Coordenação
+Não existe conexão direta do GitHub Pages com a memória e as conversas de um projeto do ChatGPT. Para importar o conhecimento:
+1. Selecione e revise materiais consolidados e autorizados (modelos sem dados pessoais, diretrizes, livros com direito de uso) e salve em PDF, DOCX, TXT ou Markdown.
+2. No site, abra **Biblioteca** e escolha **Importar material de referência**. Os textos extraídos são persistidos em IndexedDB no navegador, não no GitHub.
+3. Ao executar **Validação jurídica com IA**, os trechos considerados mais pertinentes da biblioteca serão enviados ao serviço externo, junto com o relatório e anexos, **somente depois do consentimento**.
+4. O acervo não é sincronizado entre navegadores; a biblioteca deve ser mantida e exportada pelos administradores. A importação não valida automaticamente vigência, direitos autorais ou confiabilidade.
+
+Não importe indiscriminadamente a exportação completa do ChatGPT; ela pode incluir outras conversas e dados pessoais. A função aceita ZIP de documentos selecionados, mas NÃO faz a classificação automática das conversas pelo projeto de origem.
+
+## Interpretação dos resultados
+A ausência de alterações automáticas no Word não é prova de que o relatório esteja correto ou incorreto. Sugestões cuja redação não seja localizável de forma exata, ou trechos complexos, devem ser aplicadas manualmente após verificação.
