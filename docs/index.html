@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#112b37">
-<title>SG2 | Validador Inteligente — v2.1</title>
-<link rel="stylesheet" href="./style.css?v=2.1">
+<title>SG2 | Validador Inteligente — v2.2</title>
+<link rel="stylesheet" href="./style.css?v=2.2">
 </head>
 <body>
 <div class="app">
@@ -31,7 +31,7 @@
 <p><strong>Não use com documentos confidenciais de clientes sem autorização da Addvalora.</strong> Os textos enviados deixam o processamento local. O site não consulta automaticamente o Drive.</p>
 </div>
 </section>
-<section class="library-strip"><div class="library-header"><span>▤</span><strong>Biblioteca SG2</strong><span class="chip positive">No navegador</span></div><p>Regras locais e referências editáveis, sem envio de conteúdo a serviços externos.</p><div class="chips"><span>Critérios SG2</span><span>Redação</span><span>Consistência</span><span>Personalização</span></div></section>
+<section class="library-strip"><div class="library-header"><span>▤</span><strong>Biblioteca SG2</strong><span class="chip positive">No navegador</span></div><p>Regras locais e materiais consolidados importados neste navegador. A opção com IA externa envia apenas o contexto autorizado.</p><div class="chips"><span id="knowledge-status">Acervo não importado</span><span>Critérios SG2</span><span>Redação</span><span>Consistência</span><span>Personalização</span></div></section>
 <button class="validate" id="validate" type="button">✦ &nbsp; Validar relatório <span>→</span></button><p class="tiny">Versão gratuita de hospedagem; IA sujeita à franquia da conta Puter. Não substitui a conferência jurídica nem consulta automaticamente o Drive.</p>
 </div>
 <div class="right"><section class="result-panel"><div class="righthead"><h3><span>▥</span> Resultado da validação</h3><span class="state" id="state">Aguardando</span></div>
@@ -42,10 +42,20 @@
 <div class="actions"><button id="download-word" class="outlinebtn">↓ Baixar Word com alterações</button><button id="download-list" class="outlinebtn">↓ Baixar sugestões (.txt)</button><button id="copy" class="quietbtn">Copiar sugestões</button></div></div>
 <div class="footer">Revisão assistida. A decisão final cabe ao responsável técnico.</div></section></div>
 </div></main></div>
-<dialog id="knowledge-dialog"><div class="dialog-head"><div><h2>Biblioteca SG2</h2><p>Critérios locais de validação</p></div><button id="close-knowledge" aria-label="Fechar">×</button></div><p>Você pode acrescentar regras objetivas de substituição. Elas ficam armazenadas neste navegador. Não há sincronização automática entre computadores.</p><label class="field">Expressão original<input id="rule-from" placeholder="Ex.: não houveram"></label><label class="field">Substituir por<input id="rule-to" placeholder="Ex.: não houve"></label><label class="field">Justificativa<textarea id="rule-reason" rows="2" placeholder="Explique a razão do ajuste"></textarea></label><button id="add-rule" class="save">Salvar regra</button><div id="rules-list"></div><div class="dialog-actions"><button id="export-rules">Exportar biblioteca (.json)</button><label class="import-rule"><input id="import-rules" type="file" accept=".json" hidden>Importar biblioteca</label></div><small>A biblioteca é um conjunto inicial de regras, não o acervo integral do projeto Coordenação.</small></dialog>
+<dialog id="knowledge-dialog"><div class="dialog-head"><div><h2>Biblioteca SG2</h2><p>Critérios locais de validação</p></div><button id="close-knowledge" aria-label="Fechar">×</button></div><section class="knowledge-import">
+<strong>Acervo de referência da Coordenação</strong>
+<p>Importe aqui apenas modelos, livros e diretrizes cuja utilização tenha sido autorizada. Os arquivos ficam armazenados neste navegador — nunca no repositório público.</p>
+<label class="attach"><input type="file" id="knowledge-files" multiple accept=".txt,.md,.json,.csv,.docx,.pdf,.zip" hidden>
+<span>＋ Importar material de referência</span><small>PDF, Word, texto ou ZIP</small></label>
+<p id="knowledge-feedback" role="status"></p><div id="knowledge-files-list"></div>
+<p class="hint warn">A exportação integral da conta do ChatGPT pode conter materiais pessoais e confidenciais. Não importe esse arquivo indiscriminadamente. Faça antes uma seleção dos conteúdos do projeto Coordenação.</p>
+</section>
+<hr class="separator">
+<p>Regras literais de correção: podem ser adicionadas abaixo. Elas também ficam neste navegador.</p><label class="field">Expressão original<input id="rule-from" placeholder="Ex.: não houveram"></label><label class="field">Substituir por<input id="rule-to" placeholder="Ex.: não houve"></label><label class="field">Justificativa<textarea id="rule-reason" rows="2" placeholder="Explique a razão do ajuste"></textarea></label><button id="add-rule" class="save">Salvar regra</button><div id="rules-list"></div><div class="dialog-actions"><button id="export-rules">Exportar biblioteca (.json)</button><label class="import-rule"><input id="import-rules" type="file" accept=".json" hidden>Importar biblioteca</label></div><small>A biblioteca não se conecta diretamente aos projetos do ChatGPT. O conhecimento deve ser importado e revisado pelo responsável.</small></dialog>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" defer></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" defer></script>
 <script src="https://js.puter.com/v2/" defer></script>
-<script src="./ai-review.js?v=2.1" defer></script>
-<script src="./app.js?v=2.1" defer></script>
+<script src="./knowledge.js?v=2.2" defer></script>
+<script src="./ai-review.js?v=2.2" defer></script>
+<script src="./app.js?v=2.2" defer></script>
 </body></html>
