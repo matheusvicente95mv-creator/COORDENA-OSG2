@@ -21,7 +21,36 @@ $("sources").onchange=e=>{selectedSources=[...e.target.files];$("source-label").
 $("use-ai").onchange=()=>{$("consent-area").hidden=!$("use-ai").checked; if(!$("use-ai").checked)$("ai-consent").checked=false;};
 document.querySelectorAll('input[name="mode"]').forEach(el=>el.onchange=()=>document.querySelectorAll(".mode").forEach(m=>m.classList.toggle("chosen",m.querySelector("input").checked)));
 $("drive-open").onclick=()=>{const raw=$("drive-url").value.trim();try{const u=new URL(raw);if(u.protocol!=="https:"||!["drive.google.com","docs.google.com"].includes(u.hostname))throw Error();window.open(u.href,"_blank","noopener,noreferrer");}catch{alert("Insira um link HTTPS válido do Google Drive.");}};
-$("open-knowledge").onclick=()=>{$("knowledge-dialog").showModal();renderRules();};$("close-knowledge").onclick=()=>$("knowledge-dialog").close();
+async function refreshKnowledge(){
+  if(!window.sg2Knowledge)return;
+  const items=await sg2Knowledge.list();
+  const status=$("knowledge-status");
+  if(status)status.textContent=items.length?items.length+" material(is) na biblioteca":"Acervo não importado";
+  const list=$("knowledge-files-list");
+  if(!list)return;
+  list.replaceChildren();
+  for(const item of items){
+    const div=document.createElement("div");
+    div.className="rule";
+    div.textContent=item.name+" — "+Math.round(item.content.length/1000)+" mil caracteres";
+    const button=document.createElement("button");
+    button.textContent="Excluir";button.onclick=async()=>{await sg2Knowledge.remove(item.id);await refreshKnowledge();};
+    div.append(button);list.append(div);
+  }
+}
+$("knowledge-files").onchange=async e=>{
+  const feedback=$("knowledge-feedback");
+  if(!window.sg2Knowledge){feedback.textContent="Biblioteca local indisponível neste navegador.";return;}
+  feedback.textContent="Importando materiais localmente…";
+  try{
+    const result=await sg2Knowledge.importFiles(e.target.files);
+    feedback.textContent=result.added.length+" arquivo(s) importado(s). "+(result.skipped.length?result.skipped.length+" não lido(s): "+result.skipped.slice(0,3).join("; "):"");
+    await refreshKnowledge();
+  }catch(error){feedback.textContent="Falha na importação: "+String(error.message||error);}
+  e.target.value="";
+};
+refreshKnowledge().catch(()=>{const k=$("knowledge-status");if(k)k.textContent="Biblioteca indisponível";});
+$("open-knowledge").onclick=()=>{$("knowledge-dialog").showModal();renderRules();refreshKnowledge().catch(()=>{});};$("close-knowledge").onclick=()=>$("knowledge-dialog").close();
 function renderRules(){$("rules-list").replaceChildren();rules.forEach((r,i)=>{let d=document.createElement("div");d.className="rule";d.textContent=r.from+" → "+r.to+" ("+r.reason+")";let b=document.createElement("button");b.textContent="Excluir";b.onclick=()=>{rules.splice(i,1);saveRules();renderRules();};d.append(b);$("rules-list").append(d);});}
 $("add-rule").onclick=()=>{const r={from:$("rule-from").value.trim(),to:$("rule-to").value.trim(),reason:$("rule-reason").value.trim()};if(!r.from||!r.to||!r.reason){alert("Preencha todos os campos.");return;}rules.push(r);saveRules();["rule-from","rule-to","rule-reason"].forEach(id=>$(id).value="");renderRules();};
 function downloadBlob(blob,name){const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);}
@@ -157,13 +186,14 @@ function applyTracked(xml,findings){
   return {xml:new XMLSerializer().serializeToString(doc),changed};
 }
 function asText(r){return ["SG2 | SUGESTÕES DE VALIDAÇÃO","Resultado assistido, sujeito a conferência jurídica.",...r.findings.map((f,i)=>"\n"+(i+1)+". "+f.kind+"\nOnde está: "+f.from+"\nSubstituir por / conferir: "+f.to+"\nJustificativa: "+f.reason+"\nFonte: "+f.source)].join("\n");}
-$("validate").onclick=async()=>{if(!selectedFile){alert("Selecione o relatório DOCX.");return;}if(typeof JSZip==="undefined"){alert("A biblioteca de leitura DOCX não carregou. Verifique a conexão.");return;}const useAI=$("use-ai").checked;if(useAI&&!$("ai-consent").checked){alert("Para usar IA externa, leia e confirme a autorização de envio dos dados.");return;}if(useAI){try{if(!window.puter?.auth)throw Error("Puter não carregou.");if(!puter.auth.isSignedIn())await puter.auth.signIn();}catch(e){alert("Não foi possível entrar na conta Puter: "+(e?.message||e));return;}}const b=$("validate");b.disabled=true;b.textContent="Analisando arquivos...";try{const zip=await JSZip.loadAsync(await selectedFile.arrayBuffer());const xml=await zip.file("word/document.xml")?.async("string");if(!xml)throw Error("Arquivo DOCX inválido.");const paragraphs=extractParagraphs(xml);const sources=await getSources();let aiSummary="",aiError="";
+$("validate").onclick=async()=>{if(!selectedFile){alert("Selecione o relatório DOCX.");return;}if(typeof JSZip==="undefined"){alert("A biblioteca de leitura DOCX não carregou. Verifique a conexão.");return;}const useAI=$("use-ai").checked;if(useAI&&!$("ai-consent").checked){alert("Para usar IA externa, leia e confirme a autorização de envio dos dados.");return;}if(useAI){try{if(!window.puter?.auth)throw Error("Puter não carregou.");if(!puter.auth.isSignedIn())await puter.auth.signIn();}catch(e){alert("Não foi possível entrar na conta Puter: "+(e?.message||e));return;}}const b=$("validate");b.disabled=true;b.textContent="Analisando arquivos...";try{const zip=await JSZip.loadAsync(await selectedFile.arrayBuffer());const xml=await zip.file("word/document.xml")?.async("string");if(!xml)throw Error("Arquivo DOCX inválido.");const paragraphs=extractParagraphs(xml);const sources=await getSources();let aiSummary="",aiError="",knowledgeContext=null; if(useAI&&window.sg2Knowledge){try{knowledgeContext=await sg2Knowledge.context(paragraphs.map(x=>x.value).join("\n"),26000);}catch(e){console.warn("Biblioteca local indisponível",e);}}
 let findings=[...findRules(paragraphs),...findingsDocumentary(paragraphs,sources.docs)];
 if(useAI){
   try{
     const a=await window.sg2ReviewWithAI({
       reportText:paragraphs.map(x=>x.value).join("\n"),
       caseDocuments:sources.docs,
+      knowledgeText:knowledgeContext?.text||"",
       status:msg=>{b.textContent=msg;}
     });
     aiSummary=a.summary||"";
@@ -173,7 +203,7 @@ if(useAI){
       findings.push(finding); keys.add(finding.from+"::"+finding.to);
     }
   }catch(e){aiError=String(e?.message||e); console.error("IA externa indisponível:",e);}
-}const redline=applyTracked(xml,findings);zip.file("word/document.xml",redline.xml);const docx=await zip.generateAsync({type:"blob",compression:"DEFLATE"});processed={findings,docx,redline,read:sources.docs.length,skipped:sources.skip};$("empty").hidden=true;$("active").hidden=false;$("state").textContent="Concluído";$("state").style.background="#e3f7ed";$("state").style.color="#147b5a";$("count").textContent=findings.length;$("read-count").textContent=sources.docs.length;$("skip-count").textContent=sources.skip.length;$("summary-text").textContent=aiSummary|| (findings.length?findings.length+" apontamento(s) encontrados.":"Nenhuma ocorrência identificada pelas regras locais.");let warnings=[];if($("drive-url").value.trim())warnings.push("O link do Drive não foi consultado automaticamente.");if(sources.skip.length)warnings.push(sources.skip.length+" documento(s) sem leitura (incluindo PDF ou imagens).");if(!useAI)warnings.push("Modo local: apenas regras objetivas, sem revisão jurídica profunda.");else if(aiError)warnings.push("Falha ao consultar IA externa: "+aiError+" Apenas verificações locais foram aplicadas.");else warnings.push("A análise por IA foi executada com o texto enviado. As sugestões precisam ser verificadas por um responsável técnico.");warnings.push("A biblioteca atual ainda não contém o acervo jurídico do projeto Coordenação.");if(redline.changed<findings.length)warnings.push("Alterações não aplicáveis com segurança permanecem apenas na lista de sugestões.");$("notice").textContent=warnings.join(" ");const out=$("findings");out.replaceChildren();for(const [i,f] of findings.entries()){const d=document.createElement("div");d.className="finding";d.innerHTML="<h5>"+(i+1)+". "+escapeHTML(f.kind)+"</h5><p class='before'><b>Onde está:</b> "+escapeHTML(f.from)+"</p><p class='after'><b>Substituir por / conferir:</b> "+escapeHTML(f.to)+"</p><p>"+escapeHTML(f.reason)+"</p><p><b>Fonte:</b> "+escapeHTML(f.source)+"</p>";out.append(d);}report=asText(processed);if(document.querySelector('input[name="mode"]:checked').value==="word"&&redline.changed===0)alert("A análise terminou, mas nenhum trecho foi alterado automaticamente com segurança no Word. Consulte as sugestões.");}catch(e){alert("Não foi possível validar: "+(e.message||"erro desconhecido"));}finally{b.disabled=false;b.innerHTML='✦ &nbsp; Validar relatório <span>→</span>';}}
+}const redline=applyTracked(xml,findings);zip.file("word/document.xml",redline.xml);const docx=await zip.generateAsync({type:"blob",compression:"DEFLATE"});processed={findings,docx,redline,read:sources.docs.length,skipped:sources.skip};$("empty").hidden=true;$("active").hidden=false;$("state").textContent=aiError?"Análise parcial":findings.length?"Sugestões prontas":"Sem apontamentos";$("state").style.background=aiError?"#fff1e1":"#e3f7ed";$("state").style.color="#147b5a";$("count").textContent=findings.length;$("read-count").textContent=sources.docs.length;$("skip-count").textContent=sources.skip.length;$("summary-text").textContent=aiSummary|| (findings.length?findings.length+" apontamento(s) encontrados.":"Nenhuma ocorrência identificada pelas regras locais.");let warnings=[];if($("drive-url").value.trim())warnings.push("O link do Drive não foi consultado automaticamente.");if(sources.skip.length)warnings.push(sources.skip.length+" documento(s) sem leitura (incluindo PDF ou imagens).");if(!useAI)warnings.push("Modo local: apenas regras objetivas, sem revisão jurídica profunda.");else if(aiError)warnings.push("Falha ao consultar IA externa: "+aiError+" Apenas verificações locais foram aplicadas.");else warnings.push("A análise por IA foi executada com o texto enviado. As sugestões precisam ser verificadas por um responsável técnico.");if(knowledgeContext?.totalDocuments)warnings.push("Consulta a "+knowledgeContext.totalDocuments+" material(is) importado(s) localmente; trechos selecionados conforme pertinência. Materiais ainda não verificados quanto a vigência e confiabilidade.");else warnings.push("Ainda não há acervo consolidado da Coordenação importado neste navegador.");if(redline.changed<findings.length)warnings.push("Alterações não aplicáveis com segurança permanecem apenas na lista de sugestões.");$("notice").textContent=warnings.join(" ");const out=$("findings");out.replaceChildren();for(const [i,f] of findings.entries()){const d=document.createElement("div");d.className="finding";d.innerHTML="<h5>"+(i+1)+". "+escapeHTML(f.kind)+"</h5><p class='before'><b>Onde está:</b> "+escapeHTML(f.from)+"</p><p class='after'><b>Substituir por / conferir:</b> "+escapeHTML(f.to)+"</p><p>"+escapeHTML(f.reason)+"</p><p><b>Fonte:</b> "+escapeHTML(f.source)+"</p>";out.append(d);}report=asText(processed);if(redline.changed===0){const wordButton=$("download-word");wordButton.disabled=true;wordButton.textContent=findings.length?"Word sem alterações seguras — consulte as sugestões":"Nenhuma alteração para o Word";}else{$("download-word").disabled=false;$("download-word").textContent="↓ Baixar Word com "+redline.changed+" alteração(ões)";}}catch(e){alert("Não foi possível validar: "+(e.message||"erro desconhecido"));}finally{b.disabled=false;b.innerHTML='✦ &nbsp; Validar relatório <span>→</span>';}}
 $("download-word").onclick=()=>{if(!processed)return;downloadBlob(processed.docx,(selectedFile?.name||"Relatorio.docx").replace(/\.docx$/i,"_SG2_REVISADO.docx"));};
 $("download-list").onclick=()=>{if(report)downloadBlob(new Blob([report],{type:"text/plain;charset=utf-8"}),"SG2_Sugestoes.txt");};
 $("copy").onclick=async()=>{if(!report)return;try{await navigator.clipboard.writeText(report);alert("Sugestões copiadas.");}catch{alert("Cópia indisponível neste navegador.");}};
